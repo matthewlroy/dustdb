@@ -1,0 +1,8 @@
+[package]
+name = "dustdb"
+version = "0.1.0"
+authors = ["Matthew Roy <matthew@saplink.io>"]
+edition = "2021"
+
+[dependencies]
+rand = "0.8.5"
