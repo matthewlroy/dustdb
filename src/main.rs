@@ -3,6 +3,7 @@ use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::num::ParseIntError;
+use dustcfg::get_env_var;
 
 /// DustDB v0.1.0
 /// Matthew Roy <matthew@saplink.io>
@@ -110,13 +111,6 @@ fn update() -> String {
 fn delete() -> String {
     let empty: String = "delete".to_owned();
     empty
-}
-
-fn get_env_var(desired_env_var: &str) -> String {
-    match env::var(desired_env_var) {
-        Ok(v) => v,
-        Err(e) => panic!("${} is not set ({})", desired_env_var, e),
-    }
 }
 
 /// The available commands, returned as a String on errors, for DustDB.
