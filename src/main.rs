@@ -14,17 +14,6 @@ use std::num::ParseIntError;
 /// 3. [U]pdate data already in storage.
 /// 4. [D]elete from storage.
 
-/// If an operation is SUCCESSFUL, an OK will be returned, followed by a comma,
-/// and then the resulting output. If an operation ERRORS, an ERR will be
-/// returned, followed by a comma, and then the resulting output.
-///
-/// Examples:
-///
-/// IN:     create <required params>
-/// OUT:    OK,aaf21c39-5b3b-4ea0-8eec-0467b0c8b861
-///
-/// IN:     create
-/// OUT:    ERR,<error_msg>
 fn main() -> Result<(), io::Error> {
     // https://doc.rust-lang.org/std/io/fn.stdout.html
     let stdout = io::stdout();
@@ -38,25 +27,25 @@ fn main() -> Result<(), io::Error> {
             "create" => {
                 // TODO: Error check that args[2] is valid string
                 // TODO: Error check that args[3] is valid JSON string
-                response = ddb_create(args[2].as_str(), args[3].as_str())
+                response = create(args[2].as_str(), args[3].as_str())
             }
             "read" => {
                 // TODO: Error check that args[2] is valid v4 uuid
-                response = ddb_read()
+                response = read()
             }
             "update" => {
                 // TODO: Error check that args[2] is valid v4 uuid
                 // TODO: Error check that args[3] is valid JSON string
-                response = ddb_update()
+                response = update()
             }
             "delete" => {
                 // TODO: Error check that args[2] is valid v4 uuid
-                response = ddb_delete()
+                response = delete()
             }
-            _ => response = ddb_print_command_help(),
+            _ => response = print_command_help(),
         }
     } else {
-        response = ddb_print_command_help();
+        response = print_command_help();
     }
 
     // TODO: Handle the error with the nomenclature of ERR,<ERR_MSG> from main
@@ -64,31 +53,31 @@ fn main() -> Result<(), io::Error> {
     Ok(())
 }
 
-fn ddb_create(pile_name: &str, seralized_json_as_hex: &str) -> String {
+fn create(pile_name: &str, seralized_json_as_hex: &str) -> String {
     // STEP 1: Generate a UUID to be used for future ops
-    let generated_uuid: String = ddb_generate_v4_uuid();
+    let generated_uuid: String = generate_v4_uuid();
 
     // STEP 2: Create the path for the desired pile (if not exists)
-    let ddb_file_path = format!("{}/{}", ddb_get_env_var("DUST_DATA_DIR"), pile_name);
-    let create_pile_result = fs::create_dir_all(&ddb_file_path);
+    let file_path = format!("{}/{}", get_env_var("DUST_DATA_DIR"), pile_name);
+    let create_pile_result = fs::create_dir_all(&file_path);
     match create_pile_result {
         Ok(()) => {
             // STEP 3: Write the data supplied to the file at the determined path
             // NOTE: We are writing the DECODED HEX to the file! This makes it
             // easier for future viewing.
-            let new_ddb_file_result = fs::write(
+            let new_file_result = fs::write(
                 format!(
                     "{}/{}.{}",
-                    ddb_file_path,
+                    file_path,
                     generated_uuid,
-                    ddb_get_env_var("DUST_DATA_FMT")
+                    get_env_var("DUST_DATA_FMT")
                 ),
-                ddb_decode_hex_to_ascii(seralized_json_as_hex),
+                decode_hex_to_ascii(seralized_json_as_hex),
             );
 
             // TODO: Check for uuid collision ?
 
-            match new_ddb_file_result {
+            match new_file_result {
                 Ok(()) => "OK,".to_owned() + &generated_uuid,
                 Err(e) => "ERR,".to_owned() + &e.to_string(),
             }
@@ -97,7 +86,7 @@ fn ddb_create(pile_name: &str, seralized_json_as_hex: &str) -> String {
     }
 }
 
-fn ddb_decode_hex_to_ascii(text_to_decode: &str) -> String {
+fn decode_hex_to_ascii(text_to_decode: &str) -> String {
     let v: Result<Vec<u8>, ParseIntError> = (0..text_to_decode.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&text_to_decode[i..i + 2], 16))
@@ -108,22 +97,22 @@ fn ddb_decode_hex_to_ascii(text_to_decode: &str) -> String {
     s
 }
 
-fn ddb_read() -> String {
+fn read() -> String {
     let empty: String = "read".to_owned();
     empty
 }
 
-fn ddb_update() -> String {
+fn update() -> String {
     let empty: String = "update".to_owned();
     empty
 }
 
-fn ddb_delete() -> String {
+fn delete() -> String {
     let empty: String = "delete".to_owned();
     empty
 }
 
-fn ddb_get_env_var(desired_env_var: &str) -> String {
+fn get_env_var(desired_env_var: &str) -> String {
     match env::var(desired_env_var) {
         Ok(v) => v,
         Err(e) => panic!("${} is not set ({})", desired_env_var, e),
@@ -131,7 +120,7 @@ fn ddb_get_env_var(desired_env_var: &str) -> String {
 }
 
 /// The available commands, returned as a String on errors, for DustDB.
-fn ddb_print_command_help() -> String {
+fn print_command_help() -> String {
     let mut command_help = String::new();
 
     command_help.push_str("ERR,Invalid input.");
@@ -173,7 +162,7 @@ fn ddb_print_command_help() -> String {
 ///     digits
 /// 5. Output the resulting 36-character string
 ///     "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
-fn ddb_generate_v4_uuid() -> String {
+fn generate_v4_uuid() -> String {
     let mut uuid_v4 = String::new();
 
     // 1. Generate 16 random bytes (=128 bits)
