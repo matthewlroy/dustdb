@@ -38,7 +38,7 @@ impl Request {
                 };
 
                 Ok(Request::Create {
-                    pile: pile.to_string(),
+                    pile: pile.to_string().to_lowercase(),
                     data: data.to_string(),
                 })
             }
