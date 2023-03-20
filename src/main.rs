@@ -15,8 +15,6 @@ use tokio::{io, net::TcpListener};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec};
 
-const SERVER_ADDR: &str = "127.0.0.1";
-
 /// Possible requests our clients can send us
 enum Request {
     Create { pile: String, data: String },
@@ -67,7 +65,11 @@ impl Response {
 //https://github.com/tokio-rs/tokio/blob/master/examples/tinydb.rs
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let addr = format!("{}:{}", SERVER_ADDR, get_env_var("DUST_DB_PORT"));
+    let addr = format!(
+        "{}:{}",
+        get_env_var("DUST_DB_ADDR"),
+        get_env_var("DUST_DB_PORT")
+    );
     let listener = TcpListener::bind(&addr).await?;
     println!("dustdb successfully started, listening on: {}", addr);
 
