@@ -116,6 +116,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 if let Err(e) = lines.send(response.as_str()).await {
                                     println!("Error sending response: {:?}", e);
                                 }
+
+                                println!("\n* * * *\nReceived message: {:?}", line);
+                                println!("Response to be sent: {:?}\n* * * *\n", response);
                             }
                             Err(e) => {
                                 println!("Error decoding from socket: {:?}", e);
