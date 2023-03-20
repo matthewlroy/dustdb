@@ -18,6 +18,7 @@ use tokio_util::codec::{Framed, LinesCodec};
 /// Possible requests our clients can send us
 enum Request {
     Create { pile: String, data: String },
+    Ping {},
 }
 
 impl Request {
@@ -40,7 +41,7 @@ impl Request {
                     data: data.to_string(),
                 })
             }
-
+            Some("PING") => Ok(Request::Ping {}),
             Some(cmd) => Err(format!("Error parsing request, unknown command: {}", cmd)),
             None => Err("Error parsing request, empty request".to_owned()),
         }
@@ -49,15 +50,34 @@ impl Request {
 
 /// Responses to the `Request` commands above
 enum Response {
-    Ok { message: String },
-    Error { error: String },
+    Ok {
+        exit_code: u8,
+        message: Option<String>,
+    },
+    Error {
+        exit_code: u8,
+        error: String,
+    },
 }
 
 impl Response {
     fn serialize(&self) -> String {
         match *self {
-            Response::Ok { ref message } => format!("{}", message),
-            Response::Error { ref error } => format!("Error: {}", error),
+            Response::Ok {
+                ref exit_code,
+                ref message,
+            } => format!(
+                "{} {}",
+                exit_code,
+                match message {
+                    None => "",
+                    Some(message) => message,
+                }
+            ),
+            Response::Error {
+                ref exit_code,
+                ref error,
+            } => format!("{} Error: {}", exit_code, error),
         }
     }
 }
@@ -114,17 +134,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
 fn handle_request(line: &str) -> Response {
     let request = match Request::parse(line) {
         Ok(req) => req,
-        Err(e) => return Response::Error { error: e },
+        Err(e) => {
+            return Response::Error {
+                exit_code: 1,
+                error: e,
+            }
+        }
     };
 
     match request {
         Request::Create { pile, data } => match create(&pile, &data) {
             Ok(generated_uuid) => Response::Ok {
-                message: generated_uuid,
+                exit_code: 0,
+                message: Some(generated_uuid),
             },
             Err(e) => Response::Error {
+                exit_code: 1,
                 error: format!("Error creating database entry: {}", e),
             },
+        },
+        Request::Ping {} => Response::Ok {
+            exit_code: 0,
+            message: None,
         },
     }
 }
