@@ -113,12 +113,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             Ok(line) => {
                                 let response = handle_request(&line);
                                 let response = response.serialize();
+
                                 if let Err(e) = lines.send(response.as_str()).await {
                                     println!("Error sending response: {:?}", e);
                                 }
 
+                                // TODO: DB logging via dustlog!
                                 println!("\n* * * *\nReceived message: {:?}", line);
-                                println!("Response to be sent: {:?}\n* * * *\n", response);
+                                println!("Response to be sent: {:?}\nBreaking connection now . . .\n* * * *\n", response);
+
+                                // We only accept once command at a time -- never a persistent connection
+                                break;
                             }
                             Err(e) => {
                                 println!("Error decoding from socket: {:?}", e);
