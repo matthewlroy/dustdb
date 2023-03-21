@@ -1,3 +1,4 @@
+use chrono::Utc;
 /// DustDB v0.1.0
 /// Matthew Roy <matthew@saplink.io>
 ///
@@ -8,9 +9,11 @@
 /// 3. [U]pdate data already in storage.
 /// 4. [D]elete from storage.
 use dustcfg::{decode_hex_to_utf8, generate_v4_uuid, get_env_var};
+use dustlog::{write_to_log, DBRequestLog, LogDistinction, LogLevel, LogType};
 use futures::SinkExt;
-use std::error::Error;
 use std::fs;
+use std::mem::size_of_val;
+use std::{error::Error, net::SocketAddr};
 use tokio::{io, net::TcpListener};
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Framed, LinesCodec};
@@ -22,7 +25,7 @@ enum Request {
 }
 
 impl Request {
-    fn parse(input: &str) -> Result<Request, String> {
+    fn parse(input: &str, socket_addr: &SocketAddr) -> Result<Request, String> {
         let mut parts = input.splitn(3, ' ');
         match parts.next() {
             Some("CREATE") => {
@@ -36,14 +39,31 @@ impl Request {
                     None => return Err("CREATE must have data after the pile name".to_owned()),
                 };
 
+                capture_request_log(
+                    LogLevel::INFO,
+                    socket_addr,
+                    "CREATE".to_owned(),
+                    Some(pile.to_string().to_lowercase()),
+                    Some(size_of_val(&*data)),
+                );
+
                 Ok(Request::Create {
                     pile: pile.to_string().to_lowercase(),
                     data: data.to_string(),
                 })
             }
-            Some("PING") => Ok(Request::Ping {}),
-            Some(cmd) => Err(format!("Error parsing request, unknown command: {}", cmd)),
-            None => Err("Error parsing request, empty request".to_owned()),
+            Some("PING") => {
+                capture_request_log(LogLevel::INFO, socket_addr, "PING".to_owned(), None, None);
+                Ok(Request::Ping {})
+            }
+            Some(cmd) => {
+                capture_request_log(LogLevel::ERROR, socket_addr, String::from(cmd), None, None);
+                Err(format!("Error parsing request, unknown command: {}", cmd))
+            }
+            None => {
+                capture_request_log(LogLevel::ERROR, socket_addr, "".to_owned(), None, None);
+                Err("Error parsing request, empty request".to_owned())
+            }
         }
     }
 }
@@ -95,7 +115,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     loop {
         match listener.accept().await {
-            Ok((socket, _)) => {
+            Ok((socket, socket_addr)) => {
                 // Like with other small servers, we'll `spawn` this client to ensure it
                 // runs concurrently with all other clients. The `move` keyword is used
                 // here to move ownership of our db handle into the async closure.
@@ -111,16 +131,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     while let Some(result) = lines.next().await {
                         match result {
                             Ok(line) => {
-                                let response = handle_request(&line);
+                                let response = handle_request(&line, &socket_addr);
                                 let response = response.serialize();
 
                                 if let Err(e) = lines.send(response.as_str()).await {
                                     println!("Error sending response: {:?}", e);
                                 }
-
-                                // TODO: DB logging via dustlog!
-                                println!("\n* * * *\nReceived message: {:?}", line);
-                                println!("Response to be sent: {:?}\nBreaking connection now . . .\n* * * *\n", response);
 
                                 // We only accept once command at a time -- never a persistent connection
                                 break;
@@ -139,8 +155,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-fn handle_request(line: &str) -> Response {
-    let request = match Request::parse(line) {
+fn handle_request(line: &str, socket_addr: &SocketAddr) -> Response {
+    let request = match Request::parse(line, socket_addr) {
         Ok(req) => req,
         Err(e) => {
             return Response::Error {
@@ -205,4 +221,29 @@ fn create(pile_name: &str, data_as_hex_string: &str) -> Result<String, io::Error
     }?;
 
     Ok(generated_uuid)
+}
+
+fn capture_request_log(
+    log_level: LogLevel,
+    socket_addr: &SocketAddr,
+    method: String,
+    pile_name: Option<String>,
+    payload_size_in_bytes: Option<usize>,
+) {
+    match write_to_log(
+        DBRequestLog {
+            timestamp: Utc::now(),
+            log_level,
+            log_type: LogType::REQUEST,
+            socket_addr: socket_addr.to_string(),
+            method,
+            pile_name,
+            payload_size_in_bytes,
+        }
+        .as_log_str(),
+        LogDistinction::DB,
+    ) {
+        Ok(_) => (),
+        Err(e) => eprintln!("{:?}", e),
+    }
 }
