@@ -9,7 +9,7 @@
 /// 4. [D]elete from storage.
 use chrono::Utc;
 use dustcfg::{decode_hex_to_utf8, generate_v4_uuid, get_env_var};
-use dustlog::{write_to_log, DBRequestLog, LogLevel};
+use dustlog::{write_to_log, DBRequestLog, DBResponseLog, LogLevel};
 use futures::SinkExt;
 use std::fs;
 use std::mem::size_of_val;
@@ -158,28 +158,69 @@ fn handle_request(line: &str, socket_addr: &SocketAddr) -> Response {
                 Some(size_of_val(&*line)),
             );
 
-            return Response::Error {
+            return response_handler(Response::Error {
                 exit_code: 1,
                 error: e,
-            };
+            });
         }
     };
 
     match request {
         Request::Create { pile, data } => match create(&pile, &data) {
-            Ok(generated_uuid) => Response::Ok {
+            Ok(generated_uuid) => response_handler(Response::Ok {
                 exit_code: 0,
                 message: Some(generated_uuid),
-            },
-            Err(e) => Response::Error {
+            }),
+            Err(e) => response_handler(Response::Error {
                 exit_code: 1,
                 error: format!("Error creating database entry: {}", e),
-            },
+            }),
         },
-        Request::Ping {} => Response::Ok {
+        Request::Ping {} => response_handler(Response::Ok {
             exit_code: 0,
             message: None,
-        },
+        }),
+    }
+}
+
+fn response_handler(response: Response) -> Response {
+    match response {
+        Response::Ok {
+            ref exit_code,
+            ref message,
+        } => {
+            let log = DBResponseLog {
+                timestamp: Utc::now(),
+                log_level: LogLevel::INFO,
+                exit_code: exit_code.clone(),
+                message: message.clone(),
+            };
+
+            match write_to_log(log.as_log_str(), log.get_log_distinction()) {
+                Ok(_) => (),
+                Err(e) => eprintln!("{:?}", e),
+            };
+
+            response
+        }
+        Response::Error {
+            ref exit_code,
+            ref error,
+        } => {
+            let log = DBResponseLog {
+                timestamp: Utc::now(),
+                log_level: LogLevel::ERROR,
+                exit_code: exit_code.clone(),
+                message: Some(error.clone()),
+            };
+
+            match write_to_log(log.as_log_str(), log.get_log_distinction()) {
+                Ok(_) => (),
+                Err(e) => eprintln!("{:?}", e),
+            };
+
+            response
+        }
     }
 }
 
