@@ -1,4 +1,3 @@
-use chrono::Utc;
 /// DustDB v0.1.0
 /// Matthew Roy <matthew@saplink.io>
 ///
@@ -8,6 +7,7 @@ use chrono::Utc;
 /// 2. [R]ead from storage.
 /// 3. [U]pdate data already in storage.
 /// 4. [D]elete from storage.
+use chrono::Utc;
 use dustcfg::{decode_hex_to_utf8, generate_v4_uuid, get_env_var};
 use dustlog::{write_to_log, DBRequestLog, LogDistinction, LogLevel, LogType};
 use futures::SinkExt;
@@ -25,7 +25,7 @@ enum Request {
 }
 
 impl Request {
-    fn parse(input: &str, socket_addr: &SocketAddr) -> Result<Request, String> {
+    fn parse(input: &str) -> Result<Request, String> {
         let mut parts = input.splitn(3, ' ');
         match parts.next() {
             Some("CREATE") => {
@@ -39,31 +39,14 @@ impl Request {
                     None => return Err("CREATE must have data after the pile name".to_owned()),
                 };
 
-                capture_request_log(
-                    LogLevel::INFO,
-                    socket_addr,
-                    "CREATE".to_owned(),
-                    Some(pile.to_string().to_lowercase()),
-                    Some(size_of_val(&*data)),
-                );
-
                 Ok(Request::Create {
                     pile: pile.to_string().to_lowercase(),
                     data: data.to_string(),
                 })
             }
-            Some("PING") => {
-                capture_request_log(LogLevel::INFO, socket_addr, "PING".to_owned(), None, None);
-                Ok(Request::Ping {})
-            }
-            Some(cmd) => {
-                capture_request_log(LogLevel::ERROR, socket_addr, String::from(cmd), None, None);
-                Err(format!("Error parsing request, unknown command: {}", cmd))
-            }
-            None => {
-                capture_request_log(LogLevel::ERROR, socket_addr, "".to_owned(), None, None);
-                Err("Error parsing request, empty request".to_owned())
-            }
+            Some("PING") => Ok(Request::Ping {}),
+            Some(cmd) => Err(format!("Error parsing request, unknown command: {}", cmd)),
+            None => Err("Error parsing request, empty request".to_owned()),
         }
     }
 }
@@ -156,13 +139,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn handle_request(line: &str, socket_addr: &SocketAddr) -> Response {
-    let request = match Request::parse(line, socket_addr) {
-        Ok(req) => req,
+    let request = match Request::parse(line) {
+        Ok(req) => {
+            capture_request_log(
+                LogLevel::INFO,
+                socket_addr,
+                String::from(line),
+                Some(size_of_val(&*line)),
+            );
+            
+            req
+        }
         Err(e) => {
+            capture_request_log(
+                LogLevel::ERROR,
+                socket_addr,
+                String::from(line),
+                Some(size_of_val(&*line)),
+            );
+
             return Response::Error {
                 exit_code: 1,
                 error: e,
-            }
+            };
         }
     };
 
@@ -226,8 +225,7 @@ fn create(pile_name: &str, data_as_hex_string: &str) -> Result<String, io::Error
 fn capture_request_log(
     log_level: LogLevel,
     socket_addr: &SocketAddr,
-    method: String,
-    pile_name: Option<String>,
+    command: String,
     payload_size_in_bytes: Option<usize>,
 ) {
     match write_to_log(
@@ -236,8 +234,7 @@ fn capture_request_log(
             log_level,
             log_type: LogType::REQUEST,
             socket_addr: socket_addr.to_string(),
-            method,
-            pile_name,
+            command,
             payload_size_in_bytes,
         }
         .as_log_str(),
