@@ -9,7 +9,7 @@
 /// 4. [D]elete from storage.
 use chrono::Utc;
 use dustcfg::{decode_hex_to_utf8, generate_v4_uuid, get_env_var};
-use dustlog::{write_to_log, DBRequestLog, LogDistinction, LogLevel, LogType};
+use dustlog::{write_to_log, DBRequestLog, LogLevel};
 use futures::SinkExt;
 use std::fs;
 use std::mem::size_of_val;
@@ -147,7 +147,7 @@ fn handle_request(line: &str, socket_addr: &SocketAddr) -> Response {
                 String::from(line),
                 Some(size_of_val(&*line)),
             );
-            
+
             req
         }
         Err(e) => {
@@ -228,18 +228,15 @@ fn capture_request_log(
     command: String,
     payload_size_in_bytes: Option<usize>,
 ) {
-    match write_to_log(
-        DBRequestLog {
-            timestamp: Utc::now(),
-            log_level,
-            log_type: LogType::REQUEST,
-            socket_addr: socket_addr.to_string(),
-            command,
-            payload_size_in_bytes,
-        }
-        .as_log_str(),
-        LogDistinction::DB,
-    ) {
+    let log = DBRequestLog {
+        timestamp: Utc::now(),
+        log_level,
+        socket_addr: socket_addr.to_string(),
+        command,
+        payload_size_in_bytes,
+    };
+
+    match write_to_log(log.as_log_str(), log.get_log_distinction()) {
         Ok(_) => (),
         Err(e) => eprintln!("{:?}", e),
     }
