@@ -8,11 +8,13 @@
 /// 3. [U]pdate data already in storage.
 /// 4. [D]elete from storage.
 use chrono::Utc;
-use dustcfg::{decode_hex_to_utf8, generate_v4_uuid, get_env_var};
+use dustcfg::{decode_hex_to_utf8, encode_utf8_to_hex, generate_v4_uuid, get_env_var};
 use dustlog::{write_to_log, DBRequestLog, DBResponseLog, LogLevel};
 use futures::SinkExt;
+use serde_json::{from_str, Value};
 use std::fs;
 use std::mem::size_of_val;
+use std::path::Path;
 use std::{error::Error, net::SocketAddr};
 use tokio::{io, net::TcpListener};
 use tokio_stream::StreamExt;
@@ -20,15 +22,26 @@ use tokio_util::codec::{Framed, LinesCodec};
 
 /// Possible requests our clients can send us
 enum Request {
-    Create { pile: String, data: String },
+    Create {
+        pile: String,
+        data: String,
+    },
     Ping {},
+    Find {
+        pile: String,
+        field: String,
+        compare: String,
+    },
 }
 
 impl Request {
     fn parse(input: &str) -> Result<Request, String> {
-        let mut parts = input.splitn(3, ' ');
+        let mut parts = input.splitn(2, ' ');
         match parts.next() {
             Some("CREATE") => {
+                let split_input = parts.next().unwrap();
+                parts = split_input.splitn(2, ' ');
+
                 let pile = match parts.next() {
                     Some(pile) => pile,
                     None => return Err("CREATE must have a pile name specified".to_owned()),
@@ -45,6 +58,35 @@ impl Request {
                 })
             }
             Some("PING") => Ok(Request::Ping {}),
+            Some("FIND") => {
+                let split_input = parts.next().unwrap();
+                parts = split_input.splitn(3, ' ');
+
+                let pile = match parts.next() {
+                    Some(pile) => pile,
+                    None => return Err("FIND must have a pile name specified".to_owned()),
+                };
+
+                let field = match parts.next() {
+                    Some(field) => field,
+                    None => {
+                        return Err("FIND must have a field name after the pile name".to_owned())
+                    }
+                };
+
+                let compare = match parts.next() {
+                    Some(compare) => compare,
+                    None => {
+                        return Err("FIND must have a compare name after the field name".to_owned())
+                    }
+                };
+
+                Ok(Request::Find {
+                    pile: pile.to_string().to_lowercase(),
+                    field: field.to_string(),
+                    compare: compare.to_string(),
+                })
+            }
             Some(cmd) => Err(format!("Error parsing request, unknown command: {}", cmd)),
             None => Err("Error parsing request, empty request".to_owned()),
         }
@@ -180,6 +222,20 @@ fn handle_request(line: &str, socket_addr: &SocketAddr) -> Response {
             exit_code: 0,
             message: None,
         }),
+        Request::Find {
+            pile,
+            field,
+            compare,
+        } => match find(&pile, &field, &compare) {
+            Ok(encoded_json_data) => response_handler(Response::Ok {
+                exit_code: 0,
+                message: Some(encoded_json_data),
+            }),
+            Err(e) => response_handler(Response::Error {
+                exit_code: 1,
+                error: format!("Error finding database entry: {}", e),
+            }),
+        },
     }
 }
 
@@ -224,6 +280,40 @@ fn response_handler(response: Response) -> Response {
     }
 }
 
+// Example:
+/// in: FIND users email matthew@saplink.io
+/// out: 7ABC07ABC07ABC07ABC07ABC07ABC07ABC07ABC07ABC0
+fn find(pile_name: &str, field_name: &str, compare_name: &str) -> Result<String, io::Error> {
+    let pile_path = format!("{}{}", get_env_var("DUST_DATA_STORAGE_PATH"), &pile_name);
+    let dir_path = Path::new(&pile_path);
+    if dir_path.is_dir() {
+        for entry in fs::read_dir(dir_path)? {
+            let entry = entry?;
+            let file_content = fs::read_to_string(entry.path())?;
+            let json_content: Value = from_str(&file_content)?;
+            if let Some(value) = json_content.get(field_name) {
+                if value.as_str().unwrap() == compare_name {
+                    let encoded_json_data = encode_utf8_to_hex(&file_content);
+                    return Ok(encoded_json_data);
+                }
+            }
+        }
+    }
+    // Do not want an error if pile doesn't exist, this was for testing only.
+    // If the pile doesn't exist, no data to return!
+    // else {
+    //     let e_kind = io::ErrorKind::NotFound;
+    //     let e = format!("Could not find pile: \"{}\"", pile_name).to_owned();
+    //     let error = io::Error::new(e_kind, e);
+    //     return Err(error);
+    // }
+    Ok(String::new())
+}
+
+/// Example:
+/// in: CREATE users 7ABC07ABC07ABC07ABC07ABC07ABC07ABC07ABC07ABC0
+/// out: cd8abd45-ad36-4cf6-a520-c1c5d0671d96
+///
 /// NOTE: We are writing the PLAIN TEXT DATA to the file! This makes it easier
 /// for future viewing via filesystem/other ops. This is a security trade-off:
 /// the logic here is that if a potential, bad actor already has access to the
